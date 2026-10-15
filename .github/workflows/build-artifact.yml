@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - ai-trading-source.zip
+      - android-native/**
       - .github/workflows/build-artifact.yml
   workflow_dispatch:
 
@@ -16,7 +17,42 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
+  android-apk:
+    name: Build native Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build release APK
+        working-directory: android-native
+        run: gradle --no-daemon assembleRelease
+
+      - name: Verify APK exists
+        run: test -s android-native/app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-all-native-android-apk
+          path: android-native/app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  web-artifact:
+    name: Build existing web source artifact
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -29,7 +65,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ ! -s ai-trading-source.zip ]; then
-            echo "Source ZIP absent from Git; downloading the verified source archive."
+            echo "Source ZIP absent from Git; downloading the prepared source archive."
             curl --fail --location --retry 3 --retry-delay 2 "$SOURCE_ARCHIVE_URL" --output ai-trading-source.zip
           fi
           test -s ai-trading-source.zip
@@ -42,59 +78,24 @@ jobs:
           unzip -q ai-trading-source.zip -d source
           test -f source/README.md
 
-      - name: Detect project type
+      - name: Detect web project
         id: detect
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f source/flutter_app/pubspec.yaml ]; then
-            echo "kind=apk" >> "$GITHUB_OUTPUT"
-            echo "Flutter Android source detected."
-          elif [ -f source/package.json ] && [ -f source/vendor/TradingGoose/package.json ]; then
+          if [ -f source/package.json ] && [ -f source/vendor/TradingGoose/package.json ]; then
             echo "kind=web" >> "$GITHUB_OUTPUT"
-            echo "React/Vite web source detected; this archive has no flutter_app directory."
           else
-            echo "::error::Source archive has neither flutter_app/pubspec.yaml nor the expected Vite project."
+            echo "::error::Source archive does not contain the expected Vite web project."
             exit 1
           fi
 
-      - name: Set up Flutter
-        if: steps.detect.outputs.kind == 'apk'
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Build Android APK
-        if: steps.detect.outputs.kind == 'apk'
-        working-directory: source/flutter_app
-        env:
-          BACKEND_URL: https://nse-algo-backend-final-production.up.railway.app
-        run: |
-          set -euo pipefail
-          if [ ! -d android ]; then
-            flutter create --platforms=android --project-name ai_trading_signal .
-          fi
-          GRADLE="android/app/build.gradle.kts"
-          if [ -f "$GRADLE" ]; then
-            sed -i -E 's/minSdk[[:space:]]*=[[:space:]]*flutter\.minSdkVersion/minSdk = 26/g; s/minSdk[[:space:]]*=[[:space:]]*[0-9]+/minSdk = 26/g' "$GRADLE"
-          elif [ -f android/app/build.gradle ]; then
-            sed -i -E 's/minSdkVersion[[:space:]]+flutter\.minSdkVersion/minSdkVersion 26/g; s/minSdkVersion[[:space:]]+[0-9]+/minSdkVersion 26/g' android/app/build.gradle
-          fi
-          flutter pub get
-          flutter analyze --no-fatal-infos
-          flutter test
-          flutter build apk --release --dart-define=BACKEND_URL="$BACKEND_URL"
-          test -s build/app/outputs/flutter-apk/app-release.apk
-
       - name: Set up Node.js
-        if: steps.detect.outputs.kind == 'web'
         uses: actions/setup-node@v4
         with:
           node-version: '24'
 
       - name: Build React/Vite web app
-        if: steps.detect.outputs.kind == 'web'
         working-directory: source
         run: |
           set -euo pipefail
@@ -102,17 +103,7 @@ jobs:
           npm run build
           test -s vendor/TradingGoose/dist/index.html
 
-      - name: Upload Android APK artifact
-        if: steps.detect.outputs.kind == 'apk'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-all-android-apk
-          path: source/flutter_app/build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Upload web build artifact
-        if: steps.detect.outputs.kind == 'web'
         uses: actions/upload-artifact@v4
         with:
           name: ai-all-web-artifact
