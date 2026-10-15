@@ -1,0 +1,112 @@
+name: Build AI-All Artifact
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ai-trading-source.zip
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-all-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify source archive
+        run: |
+          set -euo pipefail
+          test -s ai-trading-source.zip || {
+            echo "::error::Upload the provided source ZIP as ai-trading-source.zip to the repository root first."
+            exit 1
+          }
+          mkdir -p source
+          unzip -q ai-trading-source.zip -d source
+          test -f source/README.md
+
+      - name: Detect project type
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f source/flutter_app/pubspec.yaml ]; then
+            echo "kind=apk" >> "$GITHUB_OUTPUT"
+            echo "Flutter Android source detected."
+          elif [ -f source/package.json ] && [ -f source/vendor/TradingGoose/package.json ]; then
+            echo "kind=web" >> "$GITHUB_OUTPUT"
+            echo "React/Vite web source detected; this source archive has no flutter_app directory."
+          else
+            echo "::error::Source archive has neither flutter_app/pubspec.yaml nor the expected Vite project."
+            exit 1
+          fi
+
+      - name: Set up Flutter
+        if: steps.detect.outputs.kind == 'apk'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build Android APK
+        if: steps.detect.outputs.kind == 'apk'
+        working-directory: source/flutter_app
+        env:
+          BACKEND_URL: https://nse-algo-backend-final-production.up.railway.app
+        run: |
+          set -euo pipefail
+          if [ ! -d android ]; then
+            flutter create --platforms=android --project-name ai_trading_signal .
+          fi
+          GRADLE="android/app/build.gradle.kts"
+          if [ -f "$GRADLE" ]; then
+            sed -i -E 's/minSdk[[:space:]]*=[[:space:]]*flutter\.minSdkVersion/minSdk = 26/g; s/minSdk[[:space:]]*=[[:space:]]*[0-9]+/minSdk = 26/g' "$GRADLE"
+          elif [ -f android/app/build.gradle ]; then
+            sed -i -E 's/minSdkVersion[[:space:]]+flutter\.minSdkVersion/minSdkVersion 26/g; s/minSdkVersion[[:space:]]+[0-9]+/minSdkVersion 26/g' android/app/build.gradle
+          fi
+          flutter pub get
+          flutter analyze --no-fatal-infos
+          flutter test
+          flutter build apk --release --dart-define=BACKEND_URL="$BACKEND_URL"
+          test -s build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Set up Node.js
+        if: steps.detect.outputs.kind == 'web'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build React/Vite web app
+        if: steps.detect.outputs.kind == 'web'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          test -s vendor/TradingGoose/dist/index.html
+
+      - name: Upload Android APK artifact
+        if: steps.detect.outputs.kind == 'apk'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-all-android-apk
+          path: source/flutter_app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload web build artifact
+        if: steps.detect.outputs.kind == 'web'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-all-web-artifact
+          path: source/vendor/TradingGoose/dist/
+          if-no-files-found: error
+          retention-days: 14
