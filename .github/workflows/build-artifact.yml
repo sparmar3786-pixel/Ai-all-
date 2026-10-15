@@ -91,14 +91,14 @@ jobs:
         if: steps.detect.outputs.kind == 'web'
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Build React/Vite web app
         if: steps.detect.outputs.kind == 'web'
         working-directory: source
         run: |
           set -euo pipefail
-          npm ci --no-audit --no-fund
+          npm install --no-audit --no-fund
           npm run build
           test -s vendor/TradingGoose/dist/index.html
 
