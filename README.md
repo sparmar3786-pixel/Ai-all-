@@ -1,22 +1,36 @@
-# AI-All — Build Artifact
+# Ai all repositry — Android and web artifacts
 
-This repository is wired to build a downloadable artifact from `ai-trading-source.zip`.
+This repository builds two separate artifacts with GitHub Actions:
 
-## Add the source bundle
+- **Native Android APK wrapper** at `android-native/`. It opens the deployed FRESHAI app at the Cloud Run URL in an Android WebView, enables JavaScript and DOM storage needed by web apps, accepts cookies, keeps HTTPS-only traffic, supports Android back navigation, and sends links to other hosts to the browser.
+- **Existing web artifact** built from the prepared `ai-trading-source.zip` source bundle.
 
-The repository was empty when this bootstrap was created. Download the prepared source ZIP from this ChatGPT conversation, rename it exactly to `ai-trading-source.zip`, then use **Add file → Upload files** on this repository's `main` branch and commit it.
+## Cloud Run app URL
 
-That push starts **Build AI-All Artifact** automatically.
+`https://ais-dev-clmt6hxc2m66glvczovkmx-597262149244.asia-east1.run.app/`
 
-## What the workflow builds
+The Android app is a native Android container around the existing website, not a rewrite of the trading frontend or backend. Its market data, authentication, and trading actions still depend on the deployed website and its APIs. A successful APK build does not by itself verify broker authentication, live data, paper trading, or Cloud Run security-cookie behavior.
 
-- If the source ZIP contains `flutter_app/pubspec.yaml`, it builds and uploads a release Android APK.
-- Otherwise, if it contains `package.json` and `vendor/TradingGoose/package.json`, it builds the Vite web app and uploads the web `dist` folder.
+## Build locally
 
-The source bundle supplied with this request does **not** include `flutter_app/`, so its current build path is the web artifact, not APK. Do not treat the web artifact as an APK.
+Requirements: JDK 17, Android SDK (API 35 platform/build tools), and Gradle 8.9.
 
-## Run / download
+```bash
+cd android-native
+gradle --no-daemon assembleDebug
+gradle --no-daemon assembleRelease
+```
 
-After committing `ai-trading-source.zip`, open **Actions → Build AI-All Artifact**, wait for the run to finish, then download the artifact from that run's **Artifacts** section.
+Release output:
+`android-native/app/build/outputs/apk/release/app-release-unsigned.apk`
 
-Builds require network access to install npm/Flutter dependencies. No broker API keys or TOTP values belong in this repository.
+The CI artifact is unsigned for distribution. For public distribution, configure a signing key through GitHub Actions secrets and sign the release APK; never commit signing keys or broker/API secrets.
+
+## Build and download from GitHub
+
+1. Open **Actions → Build AI-All Artifact**.
+2. Open the latest run on the `main` branch and wait until the Android and web jobs finish.
+3. Under **Artifacts**, download `ai-all-native-android-apk` for the APK, or `ai-all-web-artifact` for the website files.
+4. Android artifacts are retained for 14 days.
+
+Workflow: `.github/workflows/build-artifact.yml`.
