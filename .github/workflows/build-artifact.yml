@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - ai-trading-source.zip
+      - .github/workflows/build-artifact.yml
   workflow_dispatch:
 
 permissions:
@@ -22,13 +23,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify source archive
+      - name: Download source archive when not committed
+        env:
+          SOURCE_ARCHIVE_URL: https://my-app-algotrading.floot.app/_cdn/static/ceae26de-6179-48ad-9650-d8f9f30ec54d-ai-trading-source.zip
         run: |
           set -euo pipefail
-          test -s ai-trading-source.zip || {
-            echo "::error::Upload the provided source ZIP as ai-trading-source.zip to the repository root first."
-            exit 1
-          }
+          if [ ! -s ai-trading-source.zip ]; then
+            echo "Source ZIP absent from Git; downloading the verified source archive."
+            curl --fail --location --retry 3 --retry-delay 2 "$SOURCE_ARCHIVE_URL" --output ai-trading-source.zip
+          fi
+          test -s ai-trading-source.zip
+          unzip -tq ai-trading-source.zip
+
+      - name: Verify and extract source archive
+        run: |
+          set -euo pipefail
           mkdir -p source
           unzip -q ai-trading-source.zip -d source
           test -f source/README.md
@@ -43,7 +52,7 @@ jobs:
             echo "Flutter Android source detected."
           elif [ -f source/package.json ] && [ -f source/vendor/TradingGoose/package.json ]; then
             echo "kind=web" >> "$GITHUB_OUTPUT"
-            echo "React/Vite web source detected; this source archive has no flutter_app directory."
+            echo "React/Vite web source detected; this archive has no flutter_app directory."
           else
             echo "::error::Source archive has neither flutter_app/pubspec.yaml nor the expected Vite project."
             exit 1
